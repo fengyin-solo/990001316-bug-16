@@ -3,32 +3,108 @@ require_once __DIR__ . '/includes/functions.php';
 require_once __DIR__ . '/config/database.php';
 
 $id = intval($_GET['id'] ?? 0);
-if ($id <= 0) {
-    header('Location: index.php');
-    exit;
-}
 
-$db = getDB();
-
-// 增加浏览量
-$db->prepare("UPDATE messages SET views = views + 1 WHERE id = ?")->execute([$id]);
-
-// 获取详情
-$stmt = $db->prepare("SELECT * FROM messages WHERE id = ? AND status = 1");
-$stmt->execute([$id]);
-$msg = $stmt->fetch();
-
-if (!$msg) {
-    header('Location: index.php');
-    exit;
-}
-
-$pageTitle = cleanInput($msg['title']) . ' - 社区便民留言板';
+$pageTitle = '留言详情 - 社区便民留言板';
 $currentPage = '';
 $cssPath = 'assets/css/style.css';
 $jsPath = 'assets/js/main.js';
 
+$msg = null;
+$invalidId = $id <= 0;
+
+if (!$invalidId) {
+    try {
+        $db = getDB();
+
+        // 先查留言，避免给不存在/未通过的留言刷浏览量
+        $stmt = $db->prepare("SELECT * FROM messages WHERE id = ?");
+        $stmt->execute([$id]);
+        $msg = $stmt->fetch();
+
+        if ($msg && (int)$msg['status'] === 1) {
+            $db->prepare("UPDATE messages SET views = views + 1 WHERE id = ? AND status = 1")->execute([$id]);
+            $msg['views'] = (int)$msg['views'] + 1;
+        }
+    } catch (Exception $e) {
+        $msg = null;
+        $loadError = true;
+    }
+}
+
 include __DIR__ . '/includes/header.php';
+
+// 异常：数据库查询失败
+if (!empty($loadError)):
+?>
+<section class="detail-section">
+    <div class="container">
+        <div class="state-card">
+            <div class="state-icon">⚠️</div>
+            <h2 class="state-title">详情加载失败</h2>
+            <p class="state-desc">网络异常或服务暂时不可用，请稍后重试。</p>
+            <div class="state-actions">
+                <a href="javascript:location.reload()" class="btn btn-primary">重新加载</a>
+                <a href="index.php" class="btn btn-secondary">返回首页</a>
+            </div>
+        </div>
+    </div>
+</section>
+<?php
+// 参数非法
+elseif ($invalidId || !$msg):
+?>
+<section class="detail-section">
+    <div class="container">
+        <div class="state-card">
+            <div class="state-icon">🔍</div>
+            <h2 class="state-title">留言不存在</h2>
+            <p class="state-desc">该留言可能已被删除，或链接地址有误。</p>
+            <div class="state-actions">
+                <a href="index.php" class="btn btn-primary">返回首页</a>
+                <a href="submit.php" class="btn btn-secondary">发布留言</a>
+            </div>
+        </div>
+    </div>
+</section>
+<?php
+// 待审核：提交后跳转或本人查看时给出明确状态，而不是“找不到”
+elseif ((int)$msg['status'] === 0):
+?>
+<section class="detail-section">
+    <div class="container">
+        <div class="state-card">
+            <div class="state-icon">⏳</div>
+            <h2 class="state-title">留言审核中</h2>
+            <p class="state-desc">您的留言「<?= cleanInput($msg['title']) ?>」已提交成功，正在等待管理员审核，审核通过后将公开展示。</p>
+            <p class="state-sub">提交时间：<?= cleanInput($msg['created_at']) ?></p>
+            <div class="state-actions">
+                <a href="index.php" class="btn btn-primary">返回首页</a>
+                <a href="submit.php" class="btn btn-secondary">再发布一条</a>
+            </div>
+        </div>
+    </div>
+</section>
+<?php
+// 已拒绝：明确说明原因状态，不暴露详情内容
+elseif ((int)$msg['status'] === 2):
+?>
+<section class="detail-section">
+    <div class="container">
+        <div class="state-card">
+            <div class="state-icon">🚫</div>
+            <h2 class="state-title">留言未通过审核</h2>
+            <p class="state-desc">该留言因不符合社区规范未通过审核，暂不对外展示。如有疑问可重新发布并补充说明。</p>
+            <div class="state-actions">
+                <a href="index.php" class="btn btn-primary">返回首页</a>
+                <a href="submit.php" class="btn btn-secondary">重新发布</a>
+            </div>
+        </div>
+    </div>
+</section>
+<?php
+else:
+    // 图片记录与文件严格同步：文件缺失时不显示图片区域
+    $imagePath = existingImagePath($msg['image']);
 ?>
 
 <section class="detail-section">
@@ -38,8 +114,8 @@ include __DIR__ . '/includes/header.php';
                 <span class="card-type type-<?= $msg['type'] ?>"><?= getTypeIcon($msg['type']) ?> <?= getTypeLabel($msg['type']) ?></span>
                 <div class="detail-meta">
                     <span>👤 <?= cleanInput($msg['nickname']) ?></span>
-                    <span>🕐 <?= $msg['created_at'] ?></span>
-                    <span>👁 <?= $msg['views'] ?> 次浏览</span>
+                    <span>🕐 <?= cleanInput($msg['created_at']) ?></span>
+                    <span>👁 <?= (int)$msg['views'] ?> 次浏览</span>
                 </div>
             </div>
 
@@ -49,9 +125,9 @@ include __DIR__ . '/includes/header.php';
                 <?= nl2br(cleanInput($msg['content'])) ?>
             </div>
 
-            <?php if ($msg['image']): ?>
+            <?php if ($imagePath): ?>
             <div class="detail-image">
-                <img src="<?= cleanInput($msg['image']) ?>" alt="留言图片" onclick="window.open(this.src)">
+                <img src="<?= cleanInput($imagePath) ?>" alt="留言图片" onclick="window.open(this.src)">
             </div>
             <?php endif; ?>
 
@@ -130,5 +206,7 @@ include __DIR__ . '/includes/header.php';
         </div>
     </div>
 </div>
+
+<?php endif; ?>
 
 <?php include __DIR__ . '/includes/footer.php'; ?>

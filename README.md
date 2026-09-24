@@ -36,6 +36,11 @@
 
 3. 安装完成后删除 `install.php` 文件
 
+> 已有环境升级时，请额外执行幂等提交所需的迁移：
+> ```bash
+> mysql -u root -p community_board < database/migration_add_client_token.sql
+> ```
+
 4. 访问首页：
    ```
    http://your-domain/index.php
@@ -78,7 +83,10 @@ label-9900013/
 │   │   └── style.css      # 样式文件
 │   └── js/
 │       └── main.js        # 脚本文件
-└── uploads/               # 图片上传目录
+└── database/
+    ├── migration_add_client_token.sql  # 幂等提交（重试不重复）
+    ├── migration_add_favorites.sql     # 收藏功能
+    └── migration_add_reports.sql       # 举报功能
 ```
 
 ## 数据库配置
@@ -116,3 +124,11 @@ define('DB_NAME', 'community_board');
 - 修改默认管理员密码
 - 确保 `uploads/` 目录有写入权限
 - 建议配置 HTTPS 保障数据传输安全
+
+## 数据一致性说明
+
+- **幂等提交**：提交页每次加载生成 `client_token`，网络中断后直接重试不会产生第二条待审记录；服务端通过唯一键保证同一凭证只入库一次。
+- **图片校验**：前后端均校验 JPG/PNG/GIF/WebP 与 5MB 限制；服务端以文件内容（finfo + getimagesize）识别真实图片，并要求扩展名与真实格式一致，格式不符会明确提示原因且保留已填文字。
+- **图片同步**：列表「有图」标记、详情页、后台审核/举报查看统一以“数据库有路径且磁盘文件存在”为准；上传落盘与入库在事务内完成，失败自动清理文件。
+- **删除清理**：后台删除留言、举报处理中删除留言时，图片文件同步删除，收藏/举报记录通过外键 `ON DELETE CASCADE` 清理，不留孤立数据。
+- **状态展示**：待审核、已拒绝、已删除、参数错误与网络/数据库异常均有独立提示页，接口失败提供原因与重试入口。

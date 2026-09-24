@@ -20,11 +20,11 @@ $offset = ($page - 1) * $pageSize;
 $where = "WHERE 1=1";
 $params = [];
 
-if ($status !== '' && in_array($status, ['0', '1', '2', '3'])) {
+if ($status !== '' && in_array($status, ['0', '1', '2', '3'], true)) {
     $where .= " AND r.status = ?";
     $params[] = intval($status);
 }
-if ($reportType && in_array($reportType, ['spam', 'abuse', 'illegal', 'porn', 'other'])) {
+if ($reportType && in_array($reportType, ['spam', 'abuse', 'illegal', 'porn', 'other'], true)) {
     $where .= " AND r.report_type = ?";
     $params[] = $reportType;
 }
@@ -36,26 +36,39 @@ if ($keyword) {
     $params[] = $kw;
 }
 
-$countStmt = $db->prepare("SELECT COUNT(*) FROM reports r LEFT JOIN messages m ON r.message_id = m.id $where");
-$countStmt->execute($params);
-$total = $countStmt->fetchColumn();
-$totalPages = ceil($total / $pageSize);
+$reports = [];
+$total = 0;
+$totalPages = 0;
+$pendingCount = 0;
+$totalReportCount = 0;
+$deletedCount = 0;
+$ignoredCount = 0;
+$loadError = false;
 
-$sql = "SELECT r.*, m.title as message_title, m.nickname as message_nickname, m.type as message_type, a.username as admin_name 
-        FROM reports r 
-        LEFT JOIN messages m ON r.message_id = m.id 
-        LEFT JOIN admins a ON r.processed_by = a.id 
-        $where 
-        ORDER BY r.created_at DESC 
-        LIMIT $pageSize OFFSET $offset";
-$stmt = $db->prepare($sql);
-$stmt->execute($params);
-$reports = $stmt->fetchAll();
+try {
+    $countStmt = $db->prepare("SELECT COUNT(*) FROM reports r LEFT JOIN messages m ON r.message_id = m.id $where");
+    $countStmt->execute($params);
+    $total = (int)$countStmt->fetchColumn();
+    $totalPages = (int)ceil($total / 15);
 
-$pendingCount = getPendingReportCount();
-$totalReportCount = $db->query("SELECT COUNT(*) FROM reports")->fetchColumn();
-$deletedCount = $db->query("SELECT COUNT(*) FROM reports WHERE status = 1")->fetchColumn();
-$ignoredCount = $db->query("SELECT COUNT(*) FROM reports WHERE status = 2")->fetchColumn();
+    $sql = "SELECT r.*, m.title as message_title, m.nickname as message_nickname, m.type as message_type, a.username as admin_name
+            FROM reports r
+            LEFT JOIN messages m ON r.message_id = m.id
+            LEFT JOIN admins a ON r.processed_by = a.id
+            $where
+            ORDER BY r.created_at DESC
+            LIMIT 15 OFFSET $offset";
+    $stmt = $db->prepare($sql);
+    $stmt->execute($params);
+    $reports = $stmt->fetchAll();
+
+    $pendingCount = (int)getPendingReportCount();
+    $totalReportCount = (int)$db->query("SELECT COUNT(*) FROM reports")->fetchColumn();
+    $deletedCount = (int)$db->query("SELECT COUNT(*) FROM reports WHERE status = 1")->fetchColumn();
+    $ignoredCount = (int)$db->query("SELECT COUNT(*) FROM reports WHERE status = 2")->fetchColumn();
+} catch (Exception $e) {
+    $loadError = true;
+}
 
 include __DIR__ . '/header.php';
 ?>
@@ -124,6 +137,16 @@ include __DIR__ . '/header.php';
         </div>
 
         <div class="admin-table-wrapper">
+            <?php if ($loadError): ?>
+            <div class="state-card">
+                <div class="state-icon">⚠️</div>
+                <h2 class="state-title">举报数据加载失败</h2>
+                <p class="state-desc">网络异常或数据库暂时不可用，请稍后重试。</p>
+                <div class="state-actions">
+                    <a href="javascript:location.reload()" class="btn btn-primary">重新加载</a>
+                </div>
+            </div>
+            <?php else: ?>
             <table class="admin-table">
                 <thead>
                     <tr>
@@ -139,7 +162,7 @@ include __DIR__ . '/header.php';
                 </thead>
                 <tbody>
                     <?php if (empty($reports)): ?>
-                    <tr><td colspan="8" class="text-center">暂无数据</td></tr>
+                    <tr><td colspan="8" class="text-center empty-row">暂无数据，请调整筛选条件后再试</td></tr>
                     <?php else: ?>
                     <?php foreach ($reports as $r): ?>
                     <tr>
@@ -169,6 +192,7 @@ include __DIR__ . '/header.php';
                     <?php endif; ?>
                 </tbody>
             </table>
+            <?php endif; ?>
         </div>
 
         <?php if ($totalPages > 1): ?>
@@ -225,7 +249,10 @@ function viewReport(id) {
     document.getElementById('reportViewModal').style.display = 'flex';
     document.getElementById('reportViewBody').innerHTML = '加载中...';
     fetch('api.php?action=report_detail&id=' + id)
-    .then(r => r.json())
+    .then(function(r) {
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        return r.json();
+    })
     .then(data => {
         if (data.code === 0) {
             const d = data.data;
@@ -245,7 +272,7 @@ function viewReport(id) {
                 html += '<p><strong>留言类型：</strong>' + d.message_type_label + '</p>';
                 html += '<p><strong>留言内容：</strong></p><div class="detail-text">' + d.message_content + '</div>';
                 if (d.message_image) {
-                    html += '<p><strong>留言图片：</strong><br><img src="../' + d.message_image + '" style="max-width:100%;margin-top:8px;"></p>';
+                    html += '<p><strong>留言图片：</strong><br><a href="../' + d.message_image + '" target="_blank"><img src="../' + d.message_image + '" style="max-width:100%;margin-top:8px;"></a></p>';
                 }
                 html += '<p><a href="../detail.php?id=' + d.message_id + '" target="_blank" class="btn btn-sm btn-info">查看原留言</a></p>';
             } else {
@@ -263,8 +290,11 @@ function viewReport(id) {
             html += '</div>';
             document.getElementById('reportViewBody').innerHTML = html;
         } else {
-            document.getElementById('reportViewBody').innerHTML = data.msg;
+            document.getElementById('reportViewBody').innerHTML = '<div class="state-inline"><p>⚠️ ' + (data.msg || '加载失败') + '</p><button class="btn btn-primary btn-sm" onclick="viewReport(' + id + ')">重试</button></div>';
         }
+    })
+    .catch(() => {
+        document.getElementById('reportViewBody').innerHTML = '<div class="state-inline"><p>⚠️ 网络异常，举报详情加载失败。</p><button class="btn btn-primary btn-sm" onclick="viewReport(' + id + ')">重试</button></div>';
     });
 }
 
@@ -313,14 +343,22 @@ function confirmProcess() {
         method: 'POST',
         body: formData
     })
-    .then(r => r.json())
+    .then(function(r) {
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        return r.json();
+    })
     .then(data => {
         if (data.code === 0) {
             alert('操作成功');
             closeProcessNoteModal();
             location.reload();
         } else {
-            alert(data.msg);
+            alert(data.msg || '操作失败，请重试');
+        }
+    })
+    .catch(() => {
+        if (confirm('网络异常，处理未完成。是否重试？\n点击“确定”重试，点击“取消”留在当前页面。')) {
+            confirmProcess();
         }
     });
 }

@@ -21,11 +21,11 @@ $offset = ($page - 1) * $pageSize;
 $where = "WHERE 1=1";
 $params = [];
 
-if ($status !== '' && in_array($status, ['0', '1', '2'])) {
+if ($status !== '' && in_array($status, ['0', '1', '2'], true)) {
     $where .= " AND status = ?";
     $params[] = intval($status);
 }
-if ($type && in_array($type, ['help', 'suggest', 'lost'])) {
+if ($type && in_array($type, ['help', 'suggest', 'lost'], true)) {
     $where .= " AND type = ?";
     $params[] = $type;
 }
@@ -37,18 +37,34 @@ if ($keyword) {
     $params[] = $kw;
 }
 
-$countStmt = $db->prepare("SELECT COUNT(*) FROM messages $where");
-$countStmt->execute($params);
-$total = $countStmt->fetchColumn();
-$totalPages = ceil($total / $pageSize);
+$messages = [];
+$total = 0;
+$totalPages = 0;
+$pendingCount = 0;
+$loadError = false;
 
-$sql = "SELECT * FROM messages $where ORDER BY created_at DESC LIMIT $pageSize OFFSET $offset";
-$stmt = $db->prepare($sql);
-$stmt->execute($params);
-$messages = $stmt->fetchAll();
+try {
+    $countStmt = $db->prepare("SELECT COUNT(*) FROM messages $where");
+    $countStmt->execute($params);
+    $total = (int)$countStmt->fetchColumn();
+    $totalPages = (int)ceil($total / 15);
 
-// 统计
-$pendingCount = $db->query("SELECT COUNT(*) FROM messages WHERE status = 0")->fetchColumn();
+    $sql = "SELECT * FROM messages $where ORDER BY created_at DESC LIMIT 15 OFFSET $offset";
+    $stmt = $db->prepare($sql);
+    $stmt->execute($params);
+    $messages = $stmt->fetchAll();
+
+    // 审核队列看到的图片记录与前台列表/详情严格一致：文件缺失视为无图
+    foreach ($messages as &$am) {
+        $am['image'] = existingImagePath($am['image']);
+    }
+    unset($am);
+
+    // 统计
+    $pendingCount = (int)$db->query("SELECT COUNT(*) FROM messages WHERE status = 0")->fetchColumn();
+} catch (Exception $e) {
+    $loadError = true;
+}
 
 include __DIR__ . '/header.php';
 ?>
@@ -98,6 +114,16 @@ include __DIR__ . '/header.php';
 
         <!-- 留言表格 -->
         <div class="admin-table-wrapper">
+            <?php if ($loadError): ?>
+            <div class="state-card">
+                <div class="state-icon">⚠️</div>
+                <h2 class="state-title">数据加载失败</h2>
+                <p class="state-desc">网络异常或数据库暂时不可用，请稍后重试。</p>
+                <div class="state-actions">
+                    <a href="javascript:location.reload()" class="btn btn-primary">重新加载</a>
+                </div>
+            </div>
+            <?php else: ?>
             <table class="admin-table">
                 <thead>
                     <tr>
@@ -105,6 +131,7 @@ include __DIR__ . '/header.php';
                         <th>类型</th>
                         <th>标题</th>
                         <th>昵称</th>
+                        <th>图片</th>
                         <th>状态</th>
                         <th>浏览</th>
                         <th>时间</th>
@@ -113,32 +140,34 @@ include __DIR__ . '/header.php';
                 </thead>
                 <tbody>
                     <?php if (empty($messages)): ?>
-                    <tr><td colspan="8" class="text-center">暂无数据</td></tr>
+                    <tr><td colspan="9" class="text-center empty-row">暂无数据，请调整筛选条件后再试</td></tr>
                     <?php else: ?>
                     <?php foreach ($messages as $msg): ?>
                     <tr>
-                        <td><?= $msg['id'] ?></td>
-                        <td><span class="badge badge-<?= $msg['type'] ?>"><?= getTypeLabel($msg['type']) ?></span></td>
+                        <td><?= (int)$msg['id'] ?></td>
+                        <td><span class="badge badge-<?= cleanInput($msg['type']) ?>"><?= getTypeLabel($msg['type']) ?></span></td>
                         <td class="td-title" title="<?= cleanInput($msg['title']) ?>"><?= cleanInput(mb_substr($msg['title'], 0, 20)) ?></td>
                         <td><?= cleanInput($msg['nickname']) ?></td>
+                        <td class="text-center"><?php if ($msg['image']): ?><a href="../<?= cleanInput($msg['image']) ?>" target="_blank" title="查看图片">📷</a><?php else: ?><span class="text-muted">-</span><?php endif; ?></td>
                         <td><span class="status-badge status-<?= getStatusClass($msg['status']) ?>"><?= getStatusLabel($msg['status']) ?></span></td>
-                        <td><?= $msg['views'] ?></td>
+                        <td><?= (int)$msg['views'] ?></td>
                         <td class="td-time"><?= date('m-d H:i', strtotime($msg['created_at'])) ?></td>
                         <td class="td-actions">
-                            <button class="btn btn-xs btn-info" onclick="viewMessage(<?= $msg['id'] ?>)">查看</button>
-                            <?php if ($msg['status'] != 1): ?>
-                            <button class="btn btn-xs btn-success" onclick="auditMessage(<?= $msg['id'] ?>, 1)">通过</button>
+                            <button class="btn btn-xs btn-info" onclick="viewMessage(<?= (int)$msg['id'] ?>)">查看</button>
+                            <?php if ((int)$msg['status'] !== 1): ?>
+                            <button class="btn btn-xs btn-success" onclick="auditMessage(<?= (int)$msg['id'] ?>, 1)">通过</button>
                             <?php endif; ?>
-                            <?php if ($msg['status'] != 2): ?>
-                            <button class="btn btn-xs btn-warning" onclick="auditMessage(<?= $msg['id'] ?>, 2)">拒绝</button>
+                            <?php if ((int)$msg['status'] !== 2): ?>
+                            <button class="btn btn-xs btn-warning" onclick="auditMessage(<?= (int)$msg['id'] ?>, 2)">拒绝</button>
                             <?php endif; ?>
-                            <button class="btn btn-xs btn-danger" onclick="deleteMessage(<?= $msg['id'] ?>)">删除</button>
+                            <button class="btn btn-xs btn-danger" onclick="deleteMessage(<?= (int)$msg['id'] ?>)">删除</button>
                         </td>
                     </tr>
                     <?php endforeach; ?>
                     <?php endif; ?>
                 </tbody>
             </table>
+            <?php endif; ?>
         </div>
 
         <!-- 分页 -->
@@ -171,49 +200,58 @@ include __DIR__ . '/header.php';
 </div>
 
 <script>
-function auditMessage(id, status) {
-    const action = status === 1 ? '通过' : '拒绝';
-    if (!confirm('确定要' + action + '这条留言吗？')) return;
+function adminPost(body, onSuccess) {
     fetch('api.php', {
         method: 'POST',
         headers: {'Content-Type': 'application/x-www-form-urlencoded'},
-        body: 'action=audit&id=' + id + '&status=' + status
+        body: body
     })
-    .then(r => r.json())
-    .then(data => {
+    .then(function(r) {
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        return r.json();
+    })
+    .then(function(data) {
         if (data.code === 0) {
-            alert('操作成功');
-            location.reload();
+            onSuccess(data);
         } else {
-            alert(data.msg);
+            alert(data.msg || '操作失败，请重试');
         }
+    })
+    .catch(function() {
+        if (confirm('网络异常，操作未完成。是否重试？\n点击“确定”重试，点击“取消”留在当前页面。')) {
+            adminPost(body, onSuccess);
+        }
+    });
+}
+
+function auditMessage(id, status) {
+    const action = status === 1 ? '通过' : '拒绝';
+    if (!confirm('确定要' + action + '这条留言吗？')) return;
+    adminPost('action=audit&id=' + id + '&status=' + status, function() {
+        alert('操作成功');
+        location.reload();
     });
 }
 
 function deleteMessage(id) {
-    if (!confirm('确定要删除这条留言吗？此操作不可恢复！')) return;
-    fetch('api.php', {
-        method: 'POST',
-        headers: {'Content-Type': 'application/x-www-form-urlencoded'},
-        body: 'action=delete&id=' + id
-    })
-    .then(r => r.json())
-    .then(data => {
-        if (data.code === 0) {
-            alert('删除成功');
-            location.reload();
-        } else {
-            alert(data.msg);
-        }
+    if (!confirm('确定要删除这条留言吗？关联图片将一并删除，此操作不可恢复！')) return;
+    adminPost('action=delete&id=' + id, function() {
+        alert('删除成功');
+        location.reload();
     });
 }
 
 function viewMessage(id) {
-    document.getElementById('viewModal').style.display = 'flex';
-    document.getElementById('modalBody').innerHTML = '加载中...';
+    const modal = document.getElementById('viewModal');
+    const body = document.getElementById('modalBody');
+    modal.style.display = 'flex';
+    body.innerHTML = '加载中...';
     fetch('api.php?action=detail&id=' + id)
-    .then(r => r.json())
-    .then(data => {
+    .then(function(r) {
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        return r.json();
+    })
+    .then(function(data) {
         if (data.code === 0) {
             const d = data.data;
             let html = '<div class="detail-view">';
@@ -222,15 +260,18 @@ function viewMessage(id) {
             html += '<p><strong>昵称：</strong>' + d.nickname + '</p>';
             html += '<p><strong>电话：</strong>' + (d.phone || '未填写') + '</p>';
             html += '<p><strong>内容：</strong></p><div class="detail-text">' + d.content + '</div>';
-            if (d.image) html += '<p><strong>图片：</strong><br><img src="../' + d.image + '" style="max-width:100%;margin-top:8px;"></p>';
+            if (d.image) html += '<p><strong>图片：</strong><br><a href="../' + d.image + '" target="_blank"><img src="../' + d.image + '" style="max-width:100%;margin-top:8px;"></a></p>';
             html += '<p><strong>状态：</strong>' + d.status_label + '</p>';
             html += '<p><strong>浏览量：</strong>' + d.views + '</p>';
             html += '<p><strong>时间：</strong>' + d.created_at + '</p>';
             html += '</div>';
-            document.getElementById('modalBody').innerHTML = html;
+            body.innerHTML = html;
         } else {
-            document.getElementById('modalBody').innerHTML = data.msg;
+            body.innerHTML = '<div class="state-inline"><p>⚠️ ' + (data.msg || '加载失败') + '</p><button class="btn btn-primary btn-sm" onclick="viewMessage(' + id + ')">重试</button></div>';
         }
+    })
+    .catch(function() {
+        body.innerHTML = '<div class="state-inline"><p>⚠️ 网络异常，详情加载失败。</p><button class="btn btn-primary btn-sm" onclick="viewMessage(' + id + ')">重试</button></div>';
     });
 }
 

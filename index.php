@@ -16,46 +16,69 @@ $page = max(1, intval($_GET['page'] ?? 1));
 $pageSize = 10;
 $offset = ($page - 1) * $pageSize;
 
-// 构建查询
-$where = "WHERE status = 1";
-$params = [];
+$messages = [];
+$total = 0;
+$totalPages = 0;
+$scrollMessages = [];
+$stats = ['total' => 0, 'help_count' => 0, 'suggest_count' => 0, 'lost_count' => 0];
+$loadError = false;
 
-if ($type && in_array($type, ['help', 'suggest', 'lost'])) {
-    $where .= " AND type = ?";
-    $params[] = $type;
+try {
+    // 构建查询
+    $where = "WHERE status = 1";
+    $params = [];
+
+    if ($type && in_array($type, ['help', 'suggest', 'lost'], true)) {
+        $where .= " AND type = ?";
+        $params[] = $type;
+    }
+
+    // 排序
+    $orderBy = ($sort === 'hot') ? "views DESC, created_at DESC" : "created_at DESC";
+
+    // 总数
+    $countStmt = $db->prepare("SELECT COUNT(*) FROM messages $where");
+    $countStmt->execute($params);
+    $total = (int)$countStmt->fetchColumn();
+    $totalPages = (int)ceil($total / $pageSize);
+
+    // 列表
+    $sql = "SELECT id, nickname, type, title, content, image, views, created_at FROM messages $where ORDER BY $orderBy LIMIT $pageSize OFFSET $offset";
+    $stmt = $db->prepare($sql);
+    $stmt->execute($params);
+    $messages = $stmt->fetchAll();
+
+    // 图片标记与详情、后台保持一致：数据库路径与磁盘文件同时存在才算“有图”
+    foreach ($messages as &$m) {
+        $m['image'] = existingImagePath($m['image']);
+    }
+    unset($m);
+
+    // 获取当前用户已收藏的留言ID
+    $favoritedIds = getFavoritedMessageIds();
+    $favoritedIds = array_flip($favoritedIds);
+
+    // 滚动数据（最新8条）
+    $scrollStmt = $db->query("SELECT id, type, title, created_at FROM messages WHERE status = 1 ORDER BY created_at DESC LIMIT 8");
+    $scrollMessages = $scrollStmt->fetchAll();
+
+    // 统计
+    $statsStmt = $db->query("SELECT
+        COUNT(*) as total,
+        SUM(CASE WHEN type='help' THEN 1 ELSE 0 END) as help_count,
+        SUM(CASE WHEN type='suggest' THEN 1 ELSE 0 END) as suggest_count,
+        SUM(CASE WHEN type='lost' THEN 1 ELSE 0 END) as lost_count
+        FROM messages WHERE status = 1");
+    $stats = $statsStmt->fetch();
+    $stats = [
+        'total' => (int)($stats['total'] ?? 0),
+        'help_count' => (int)($stats['help_count'] ?? 0),
+        'suggest_count' => (int)($stats['suggest_count'] ?? 0),
+        'lost_count' => (int)($stats['lost_count'] ?? 0),
+    ];
+} catch (Exception $e) {
+    $loadError = true;
 }
-
-// 排序
-$orderBy = ($sort === 'hot') ? "views DESC, created_at DESC" : "created_at DESC";
-
-// 总数
-$countStmt = $db->prepare("SELECT COUNT(*) FROM messages $where");
-$countStmt->execute($params);
-$total = $countStmt->fetchColumn();
-$totalPages = ceil($total / $pageSize);
-
-// 列表
-$sql = "SELECT id, nickname, type, title, content, image, views, created_at FROM messages $where ORDER BY $orderBy LIMIT $pageSize OFFSET $offset";
-$stmt = $db->prepare($sql);
-$stmt->execute($params);
-$messages = $stmt->fetchAll();
-
-// 获取当前用户已收藏的留言ID
-$favoritedIds = getFavoritedMessageIds();
-$favoritedIds = array_flip($favoritedIds);
-
-// 滚动数据（最新5条）
-$scrollStmt = $db->query("SELECT id, type, title, created_at FROM messages WHERE status = 1 ORDER BY created_at DESC LIMIT 8");
-$scrollMessages = $scrollStmt->fetchAll();
-
-// 统计
-$statsStmt = $db->query("SELECT 
-    COUNT(*) as total,
-    SUM(CASE WHEN type='help' THEN 1 ELSE 0 END) as help_count,
-    SUM(CASE WHEN type='suggest' THEN 1 ELSE 0 END) as suggest_count,
-    SUM(CASE WHEN type='lost' THEN 1 ELSE 0 END) as lost_count
-    FROM messages WHERE status = 1");
-$stats = $statsStmt->fetch();
 
 include __DIR__ . '/includes/header.php';
 ?>
@@ -123,10 +146,20 @@ include __DIR__ . '/includes/header.php';
 <!-- 留言列表 -->
 <section class="message-list-section">
     <div class="container">
-        <?php if (empty($messages)): ?>
+        <?php if ($loadError): ?>
+        <div class="state-card">
+            <div class="state-icon">⚠️</div>
+            <h2 class="state-title">留言加载失败</h2>
+            <p class="state-desc">网络异常或服务暂时不可用，请检查网络后重试。</p>
+            <div class="state-actions">
+                <a href="javascript:location.reload()" class="btn btn-primary">重新加载</a>
+                <a href="submit.php" class="btn btn-secondary">发布留言</a>
+            </div>
+        </div>
+        <?php elseif (empty($messages)): ?>
         <div class="empty-state">
             <div class="empty-icon">📭</div>
-            <p>暂无留言信息</p>
+            <p><?= $type ? '该分类下暂无留言信息' : '暂无留言信息' ?></p>
             <a href="submit.php" class="btn btn-primary">发布第一条留言</a>
         </div>
         <?php else: ?>

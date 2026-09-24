@@ -35,7 +35,10 @@ function toggleFavorite(event, btn) {
         method: 'POST',
         body: formData
     })
-    .then(response => response.json())
+    .then(function(response) {
+        if (!response.ok) throw new Error('HTTP ' + response.status);
+        return response.json();
+    })
     .then(result => {
         if (result.code === 0) {
             if (result.data.favorited) {
@@ -271,7 +274,10 @@ function submitReport() {
         method: 'POST',
         body: formData
     })
-    .then(response => response.json())
+    .then(function(response) {
+        if (!response.ok) throw new Error('HTTP ' + response.status);
+        return response.json();
+    })
     .then(result => {
         if (result.code === 0) {
             showToast(result.msg, 'success');

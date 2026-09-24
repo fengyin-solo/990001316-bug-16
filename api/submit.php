@@ -4,61 +4,33 @@ require_once __DIR__ . '/../config/database.php';
 
 header('Content-Type: application/json; charset=utf-8');
 
-if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+if (($_SERVER['REQUEST_METHOD'] ?? '') !== 'POST') {
     jsonResponse(405, '不支持的请求方式');
 }
 
-$nickname = trim($_POST['nickname'] ?? '');
-$phone = trim($_POST['phone'] ?? '');
-$type = $_POST['type'] ?? 'help';
-$title = trim($_POST['title'] ?? '');
-$content = trim($_POST['content'] ?? '');
+$imageFile = $_FILES['image'] ?? null;
 
-// 验证
-if (empty($nickname)) jsonResponse(1, '请输入昵称');
-if (mb_strlen($nickname) > 50) jsonResponse(1, '昵称不能超过50个字符');
-if (empty($title)) jsonResponse(1, '请输入标题');
-if (mb_strlen($title) > 100) jsonResponse(1, '标题不能超过100个字符');
-if (empty($content)) jsonResponse(1, '请输入内容');
-if (mb_strlen($content) > 2000) jsonResponse(1, '内容不能超过2000个字符');
-if (!in_array($type, ['help', 'suggest', 'lost'])) jsonResponse(1, '无效的留言类型');
-
-// 处理图片上传
-$imagePath = null;
-if (!empty($_FILES['image']['name']) && $_FILES['image']['error'] === UPLOAD_ERR_OK) {
-    $file = $_FILES['image'];
-    $allowedTypes = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
-    $maxSize = 5 * 1024 * 1024;
-
-    if (!in_array($file['type'], $allowedTypes)) {
-        jsonResponse(1, '仅支持 JPG、PNG、GIF、WebP 格式的图片');
-    }
-    if ($file['size'] > $maxSize) {
-        jsonResponse(1, '图片大小不能超过5MB');
-    }
-
-    $uploadDir = __DIR__ . '/../uploads/';
-    if (!is_dir($uploadDir)) {
-        mkdir($uploadDir, 0755, true);
-    }
-
-    $ext = pathinfo($file['name'], PATHINFO_EXTENSION);
-    $filename = date('Ymd_His') . '_' . bin2hex(random_bytes(4)) . '.' . $ext;
-    $targetPath = $uploadDir . $filename;
-
-    if (move_uploaded_file($file['tmp_name'], $targetPath)) {
-        $imagePath = 'uploads/' . $filename;
-    } else {
-        jsonResponse(1, '图片上传失败');
-    }
+// 未选择图片时 PHP 不会生成该字段，构造一个统一的“无文件”标记
+if ($imageFile === null) {
+    $imageFile = ['error' => UPLOAD_ERR_NO_FILE];
 }
 
-// 入库
 try {
-    $db = getDB();
-    $stmt = $db->prepare("INSERT INTO messages (nickname, phone, type, title, content, image, status) VALUES (?, ?, ?, ?, ?, ?, 0)");
-    $stmt->execute([$nickname, $phone ?: null, $type, $title, $content, $imagePath]);
-    jsonResponse(0, '留言提交成功，等待审核');
+    $result = submitMessage($_POST, $imageFile);
+
+    if ($result['duplicated']) {
+        // 网络中断后重试：第一次其实已成功，不重复落地，明确告知用户
+        jsonResponse(0, '该留言已提交成功，无需重复提交，当前状态：' . $result['status_text'], [
+            'message_id' => $result['message_id'],
+            'duplicated' => true,
+        ]);
+    }
+
+    jsonResponse(0, '留言提交成功，等待审核', [
+        'message_id' => $result['message_id'],
+        'duplicated' => false,
+    ]);
 } catch (Exception $e) {
-    jsonResponse(500, '服务器错误，请稍后重试');
+    // 校验类错误（含图片格式不符）明确返回原因；前端保留用户已填全部内容
+    jsonResponse(1, $e->getMessage());
 }

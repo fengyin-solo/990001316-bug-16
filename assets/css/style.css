@@ -231,6 +231,51 @@ a:hover { color: var(--primary-dark); }
 .empty-icon { font-size: 4rem; margin-bottom: 16px; }
 .empty-state p { color: var(--gray-500); margin-bottom: 20px; }
 
+/* ========== State Card（失败 / 不存在 / 审核中 / 已拒绝） ========== */
+.state-card {
+    max-width: 520px;
+    margin: 40px auto;
+    background: #fff;
+    border-radius: var(--radius);
+    box-shadow: var(--shadow);
+    padding: 48px 32px;
+    text-align: center;
+}
+.state-icon { font-size: 3.5rem; margin-bottom: 16px; }
+.state-title { font-size: 1.25rem; margin-bottom: 12px; color: var(--gray-800, #1f2937); }
+.state-desc { color: var(--gray-500); line-height: 1.7; margin-bottom: 8px; }
+.state-sub { color: var(--gray-400); font-size: .85rem; margin-bottom: 8px; }
+.state-actions { margin-top: 24px; display: flex; gap: 12px; justify-content: center; flex-wrap: wrap; }
+
+/* 弹窗/表格内的内联失败态 */
+.state-inline { text-align: center; padding: 24px 16px; color: var(--gray-600); }
+.state-inline p { margin-bottom: 14px; }
+.empty-row { padding: 32px 12px; color: var(--gray-400); }
+
+/* 后台数据加载失败时，状态卡片填满表格容器 */
+.admin-table-wrapper .state-card { margin: 20px auto; max-width: 560px; }
+
+/* ========== 表单错误提示 ========== */
+.form-alert {
+    padding: 10px 14px;
+    border-radius: var(--radius-sm);
+    margin-bottom: 18px;
+    font-size: .9rem;
+    line-height: 1.6;
+}
+.form-alert-error { background: #fef2f2; color: var(--danger); border: 1px solid #fecaca; }
+.form-alert-success { background: #ecfdf5; color: var(--success); border: 1px solid #a7f3d0; }
+.field-error {
+    display: block;
+    color: var(--danger);
+    font-size: .8rem;
+    margin-top: 5px;
+    min-height: 0;
+    line-height: 1.4;
+}
+.form-group input.input-error,
+.form-group textarea.input-error { border-color: var(--danger); }
+
 /* ========== Submit Form ========== */
 .submit-section { padding: 32px 0; }
 .submit-card {
