@@ -395,6 +395,8 @@ a:hover { color: var(--primary-dark); }
 .login-footer { text-align: center; margin-top: 16px; }
 .alert { padding: 10px 14px; border-radius: var(--radius-sm); margin-bottom: 16px; font-size: .9rem; }
 .alert-error { background: #fef2f2; color: var(--danger); border: 1px solid #fecaca; }
+.alert-success { background: #ecfdf5; color: #047857; border: 1px solid #a7f3d0; }
+.upload-error { margin-top: 8px; padding: 8px 12px; border-radius: var(--radius-sm); background: #fef2f2; color: var(--danger); border: 1px solid #fecaca; font-size: .85rem; }
 
 /* ========== Admin ========== */
 .admin-body { background: var(--gray-100); }

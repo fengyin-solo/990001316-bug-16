@@ -139,7 +139,21 @@ include __DIR__ . '/header.php';
                 </thead>
                 <tbody>
                     <?php if (empty($reports)): ?>
-                    <tr><td colspan="8" class="text-center">暂无数据</td></tr>
+                    <tr><td colspan="8" class="text-center">
+                        <div style="padding:28px 12px;color:var(--gray-500);">
+                            <div style="font-size:2rem;margin-bottom:8px;">🚩</div>
+                            <?php if ($status === '0'): ?>
+                            <p>暂无待处理举报</p>
+                            <?php elseif ($status !== ''): ?>
+                            <p>该状态下暂无举报记录</p>
+                            <?php elseif ($keyword !== '' || $reportType !== ''): ?>
+                            <p>没有符合筛选条件的举报，请尝试调整筛选条件</p>
+                            <a href="reports.php" class="btn btn-secondary btn-sm" style="margin-top:8px;">清除筛选</a>
+                            <?php else: ?>
+                            <p>暂无举报数据</p>
+                            <?php endif; ?>
+                        </div>
+                    </td></tr>
                     <?php else: ?>
                     <?php foreach ($reports as $r): ?>
                     <tr>
@@ -211,7 +225,7 @@ include __DIR__ . '/header.php';
             </div>
             <div class="form-actions">
                 <button type="button" class="btn btn-secondary" onclick="closeProcessNoteModal()">取消</button>
-                <button type="button" class="btn btn-primary" onclick="confirmProcess()">确认处理</button>
+                <button type="button" class="btn btn-primary" onclick="confirmProcess(this)">确认处理</button>
             </div>
         </div>
     </div>
@@ -244,8 +258,10 @@ function viewReport(id) {
                 html += '<p><strong>留言作者：</strong>' + d.message_nickname + '</p>';
                 html += '<p><strong>留言类型：</strong>' + d.message_type_label + '</p>';
                 html += '<p><strong>留言内容：</strong></p><div class="detail-text">' + d.message_content + '</div>';
-                if (d.message_image) {
-                    html += '<p><strong>留言图片：</strong><br><img src="../' + d.message_image + '" style="max-width:100%;margin-top:8px;"></p>';
+                if (d.message_image_url) {
+                    html += '<p><strong>留言图片：</strong><br><img src="../' + encodeURI(d.message_image_url) + '" style="max-width:100%;margin-top:8px;"></p>';
+                } else if (d.message_image) {
+                    html += '<p class="text-muted">图片文件缺失或路径异常</p>';
                 }
                 html += '<p><a href="../detail.php?id=' + d.message_id + '" target="_blank" class="btn btn-sm btn-info">查看原留言</a></p>';
             } else {
@@ -263,8 +279,11 @@ function viewReport(id) {
             html += '</div>';
             document.getElementById('reportViewBody').innerHTML = html;
         } else {
-            document.getElementById('reportViewBody').innerHTML = data.msg;
+            document.getElementById('reportViewBody').innerHTML = '<div class="empty-state"><div class="empty-icon">⚠️</div><p>' + String(data.msg || '加载失败') + '</p><button type="button" class="btn btn-secondary" onclick="viewReport(' + id + ')">重试</button></div>';
         }
+    })
+    .catch(() => {
+        document.getElementById('reportViewBody').innerHTML = '<div class="empty-state"><div class="empty-icon">📡</div><p>网络错误，详情加载失败</p><button type="button" class="btn btn-primary" onclick="viewReport(' + id + ')">重试</button></div>';
     });
 }
 
@@ -299,7 +318,7 @@ function closeProcessNoteModal() {
     pendingProcessStatus = null;
 }
 
-function confirmProcess() {
+function confirmProcess(btn) {
     if (!pendingProcessId || !pendingProcessStatus) return;
 
     const note = document.getElementById('processNote').value;
@@ -309,6 +328,8 @@ function confirmProcess() {
     formData.append('status', pendingProcessStatus);
     formData.append('note', note);
 
+    if (btn) { btn.disabled = true; btn.textContent = '处理中...'; }
+
     fetch('api.php', {
         method: 'POST',
         body: formData
@@ -316,12 +337,17 @@ function confirmProcess() {
     .then(r => r.json())
     .then(data => {
         if (data.code === 0) {
-            alert('操作成功');
+            alert(data.msg || '操作成功');
             closeProcessNoteModal();
             location.reload();
         } else {
-            alert(data.msg);
+            alert(data.msg || '操作失败，数据未变更，请重试');
+            if (btn) { btn.disabled = false; btn.textContent = '确认处理'; }
         }
+    })
+    .catch(() => {
+        alert('网络错误，操作未完成，数据未变更，请重试');
+        if (btn) { btn.disabled = false; btn.textContent = '确认处理'; }
     });
 }
 

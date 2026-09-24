@@ -86,7 +86,9 @@ function getVisitorId() {
         if (!empty($_COOKIE['visitor_id'])) {
             $_SESSION['visitor_id'] = $_COOKIE['visitor_id'];
         } else {
-            $visitorId = md5(uniqid('visitor_', true) . $_SERVER['REMOTE_ADDR'] . $_SERVER['HTTP_USER_AGENT']);
+            $remoteAddr = $_SERVER['REMOTE_ADDR'] ?? '0.0.0.0';
+            $userAgent = $_SERVER['HTTP_USER_AGENT'] ?? '';
+            $visitorId = md5(uniqid('visitor_', true) . $remoteAddr . $userAgent);
             $_SESSION['visitor_id'] = $visitorId;
             setcookie('visitor_id', $visitorId, time() + 86400 * 365, '/');
         }
@@ -233,4 +235,98 @@ function submitReport($messageId, $reportType, $description = '') {
 function getPendingReportCount() {
     $db = getDB();
     return $db->query("SELECT COUNT(*) FROM reports WHERE status = 0")->fetchColumn();
+}
+
+/**
+ * 完整删除一条留言及其关联数据与图片文件
+ *
+ * 在事务中删除 favorites / reports / messages，保证列表、详情、审核队列、
+ * 图片记录四处同步；DB 全部成功后才删除磁盘文件，任何一步失败都整体回滚，
+ * 不残留孤立记录或孤立图片。
+ *
+ * @param PDO $db
+ * @param int $id
+ * @param int|null $adminId 若由举报处理触发，关联举报将被标记为"已处理-已删除"而非删除
+ * @param string $note 处理备注
+ * @return bool 是否删除成功（留言不存在返回 false）
+ * @throws Exception 失败时抛出，事务已回滚
+ */
+function deleteMessageCascade(PDO $db, $id, $adminId = null, $note = '') {
+    $db->beginTransaction();
+    try {
+        $stmt = $db->prepare("SELECT image FROM messages WHERE id = ? FOR UPDATE");
+        $stmt->execute([$id]);
+        $msg = $stmt->fetch();
+
+        if (!$msg) {
+            $db->rollBack();
+            return false;
+        }
+
+        // 显式清理关联数据（即使外键级联存在，也保证各队列计数同步刷新）
+        $db->prepare("DELETE FROM favorites WHERE message_id = ?")->execute([$id]);
+
+        if ($adminId !== null) {
+            // 从举报处理流程进入：保留举报记录作为审计轨迹，避免待处理队列残留
+            $db->prepare(
+                "UPDATE reports
+                 SET status = 1, processed_by = ?, processed_at = NOW(), process_note = ?
+                 WHERE message_id = ?"
+            )->execute([$adminId, $note !== '' ? $note : '留言已删除', $id]);
+        } else {
+            $db->prepare("DELETE FROM reports WHERE message_id = ?")->execute([$id]);
+        }
+
+        $db->prepare("DELETE FROM submission_tokens WHERE message_id = ?")->execute([$id]);
+        $db->prepare("DELETE FROM messages WHERE id = ?")->execute([$id]);
+
+        $db->commit();
+    } catch (Exception $e) {
+        if ($db->inTransaction()) {
+            $db->rollBack();
+        }
+        throw $e;
+    }
+
+    // 数据库已提交后再删图片文件；文件缺失不影响数据一致性，删除失败仅记录告警
+    if (!empty($msg['image'])) {
+        $imgFile = __DIR__ . '/../' . ltrim($msg['image'], '/');
+        if (is_file($imgFile) && !@unlink($imgFile)) {
+            error_log('无法删除留言图片（记录已删除）: ' . $imgFile);
+        }
+    }
+
+    return true;
+}
+
+/**
+ * 校验图片路径是否为当前站点 uploads 目录下的合法相对路径
+ * 防止详情页/管理后台输出被篡改的路径
+ */
+function isValidImagePath($path) {
+    if (!is_string($path) || $path === '') {
+        return false;
+    }
+    if (strpos($path, 'uploads/') !== 0) {
+        return false;
+    }
+    // 不允许目录穿越、反斜杠、空字节
+    if (strpos($path, '..') !== false || strpos($path, "\0") !== false || strpos($path, '\\') !== false) {
+        return false;
+    }
+    return (bool) preg_match('#^uploads/[A-Za-z0-9_/.-]+\.(jpe?g|png|gif|webp)$#i', $path);
+}
+
+/**
+ * 输出安全的图片地址；路径非法或文件不存在时返回 null（列表“有图”标记与详情展示保持一致）
+ */
+function publicImageUrl($path) {
+    if (!isValidImagePath($path)) {
+        return null;
+    }
+    $full = __DIR__ . '/../' . $path;
+    if (!is_file($full)) {
+        return null;
+    }
+    return $path;
 }

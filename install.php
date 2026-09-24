@@ -23,14 +23,25 @@ try {
         `title` VARCHAR(100) NOT NULL COMMENT '标题',
         `content` TEXT NOT NULL COMMENT '内容',
         `image` VARCHAR(255) DEFAULT NULL COMMENT '图片路径',
+        `content_fingerprint` CHAR(64) DEFAULT NULL COMMENT '内容指纹（去重）',
         `status` TINYINT NOT NULL DEFAULT 0 COMMENT '状态: 0待审核, 1已通过, 2已拒绝',
         `views` INT UNSIGNED NOT NULL DEFAULT 0 COMMENT '浏览量',
         `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
         `updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
         INDEX `idx_type` (`type`),
         INDEX `idx_status` (`status`),
-        INDEX `idx_created` (`created_at`)
+        INDEX `idx_created` (`created_at`),
+        INDEX `idx_fingerprint_status` (`content_fingerprint`, `status`)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='留言表'");
+
+    // 提交幂等令牌表（防止网络中断重试产生重复待审记录）
+    $pdo->exec("CREATE TABLE IF NOT EXISTS `submission_tokens` (
+        `token` CHAR(64) NOT NULL COMMENT '提交幂等令牌',
+        `message_id` INT UNSIGNED DEFAULT NULL COMMENT '对应留言ID',
+        `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+        PRIMARY KEY (`token`),
+        INDEX `idx_message_id` (`message_id`)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='留言提交幂等令牌表'");
 
     // 管理员表
     $pdo->exec("CREATE TABLE IF NOT EXISTS `admins` (

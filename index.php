@@ -61,6 +61,7 @@ include __DIR__ . '/includes/header.php';
 ?>
 
 <!-- 滚动信息栏 -->
+<?php if (!empty($scrollMessages)): ?>
 <div class="scroll-bar">
     <div class="container">
         <span class="scroll-label">📢 最新动态</span>
@@ -77,6 +78,7 @@ include __DIR__ . '/includes/header.php';
         </div>
     </div>
 </div>
+<?php endif; ?>
 
 <!-- 统计卡片 -->
 <section class="stats-section">
@@ -142,7 +144,7 @@ include __DIR__ . '/includes/header.php';
                     <p class="card-content"><?= cleanInput(mb_substr($msg['content'], 0, 80)) ?><?= mb_strlen($msg['content']) > 80 ? '...' : '' ?></p>
                     <div class="card-footer">
                         <span class="card-author">👤 <?= cleanInput($msg['nickname']) ?></span>
-                        <?php if ($msg['image']): ?>
+                        <?php if (publicImageUrl($msg['image'])): ?>
                         <span class="card-image">📷 有图</span>
                         <?php endif; ?>
                         <span class="card-views">👁 <?= $msg['views'] ?></span>

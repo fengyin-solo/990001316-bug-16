@@ -2,9 +2,9 @@
  * 社区便民留言板 - 前端脚本
  */
 document.addEventListener('DOMContentLoaded', function() {
-    // 滚动信息复制实现无缝滚动
+    // 滚动信息复制实现无缝滚动（无数据时不处理，避免清空报错）
     const scrollContent = document.getElementById('scrollContent');
-    if (scrollContent) {
+    if (scrollContent && scrollContent.children.length > 0) {
         scrollContent.innerHTML += scrollContent.innerHTML;
     }
 });

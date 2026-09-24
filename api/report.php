@@ -22,8 +22,9 @@ try {
         $reported = hasReported($messageId);
         jsonResponse(0, '查询成功', ['reported' => $reported]);
     } elseif ($action === 'submit') {
-        $reportType = cleanInput($_POST['report_type'] ?? '');
-        $description = cleanInput($_POST['description'] ?? '');
+        // 入库前仅去除首尾空白，转义在展示层统一进行
+        $reportType = trim($_POST['report_type'] ?? '');
+        $description = trim($_POST['description'] ?? '');
 
         if (empty($reportType)) {
             jsonResponse(1, '请选择举报类型');

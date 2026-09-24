@@ -10,18 +10,64 @@ if ($id <= 0) {
 
 $db = getDB();
 
-// 增加浏览量
-$db->prepare("UPDATE messages SET views = views + 1 WHERE id = ?")->execute([$id]);
-
-// 获取详情
+// 获取详情（先确认留言存在且已通过审核，再增加浏览量，避免无效/未审核留言被计数）
 $stmt = $db->prepare("SELECT * FROM messages WHERE id = ? AND status = 1");
 $stmt->execute([$id]);
 $msg = $stmt->fetch();
 
 if (!$msg) {
-    header('Location: index.php');
+    // 区分“不存在/已删除”与“待审核/已拒绝”，给出准确说明而非静默跳转
+    $stmt2 = $db->prepare("SELECT status FROM messages WHERE id = ?");
+    $stmt2->execute([$id]);
+    $row = $stmt2->fetch();
+
+    $pageTitle = '留言不可见 - 社区便民留言板';
+    $currentPage = '';
+    $cssPath = 'assets/css/style.css';
+    $jsPath = 'assets/js/main.js';
+    include __DIR__ . '/includes/header.php';
+
+    if ($row && (int)$row['status'] === 0) {
+        $notFoundTitle = '留言审核中';
+        $notFoundDesc = '该留言正在等待管理员审核，审核通过后即可查看。';
+    } elseif ($row && (int)$row['status'] === 2) {
+        $notFoundTitle = '留言未通过审核';
+        $notFoundDesc = '该留言因不符合社区规范未通过审核，暂时无法查看。';
+    } else {
+        http_response_code(404);
+        $notFoundTitle = '留言不存在或已删除';
+        $notFoundDesc = '您访问的留言可能已被作者撤回或管理员删除。';
+    }
+    ?>
+    <section class="detail-section">
+        <div class="container">
+            <div class="detail-card">
+                <div class="empty-state">
+                    <div class="empty-icon">🔍</div>
+                    <h2><?= $notFoundTitle ?></h2>
+                    <p><?= $notFoundDesc ?></p>
+                    <div class="form-actions" style="justify-content:center;">
+                        <a href="index.php" class="btn btn-primary">返回留言列表</a>
+                        <a href="submit.php" class="btn btn-secondary">发布新留言</a>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+    <?php
+    include __DIR__ . '/includes/footer.php';
     exit;
 }
+
+// 留言可见，浏览量 +1（失败不影响页面展示）
+try {
+    $db->prepare("UPDATE messages SET views = views + 1 WHERE id = ?")->execute([$id]);
+    $msg['views'] = (int)$msg['views'] + 1;
+} catch (Exception $e) {
+    error_log('浏览量更新失败: ' . $e->getMessage());
+}
+
+$imageUrl = publicImageUrl($msg['image']);
 
 $pageTitle = cleanInput($msg['title']) . ' - 社区便民留言板';
 $currentPage = '';
@@ -49,9 +95,9 @@ include __DIR__ . '/includes/header.php';
                 <?= nl2br(cleanInput($msg['content'])) ?>
             </div>
 
-            <?php if ($msg['image']): ?>
+            <?php if ($imageUrl): ?>
             <div class="detail-image">
-                <img src="<?= cleanInput($msg['image']) ?>" alt="留言图片" onclick="window.open(this.src)">
+                <img src="<?= cleanInput($imageUrl) ?>" alt="留言图片" onclick="window.open(this.src)">
             </div>
             <?php endif; ?>
 

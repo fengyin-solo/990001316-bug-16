@@ -113,13 +113,32 @@ include __DIR__ . '/header.php';
                 </thead>
                 <tbody>
                     <?php if (empty($messages)): ?>
-                    <tr><td colspan="8" class="text-center">暂无数据</td></tr>
+                    <tr><td colspan="8" class="text-center">
+                        <div style="padding:28px 12px;color:var(--gray-500);">
+                            <div style="font-size:2rem;margin-bottom:8px;">🗂️</div>
+                            <?php if ($status === '0'): ?>
+                            <p>暂无待审核留言，新提交的留言会出现在这里</p>
+                            <?php elseif ($status === '1'): ?>
+                            <p>暂无已通过的留言</p>
+                            <?php elseif ($status === '2'): ?>
+                            <p>暂无已拒绝的留言</p>
+                            <?php elseif ($keyword !== '' || $type !== ''): ?>
+                            <p>没有符合筛选条件的留言，请尝试调整关键词或筛选条件</p>
+                            <a href="index.php" class="btn btn-secondary btn-sm" style="margin-top:8px;">清除筛选</a>
+                            <?php else: ?>
+                            <p>暂无留言数据</p>
+                            <?php endif; ?>
+                        </div>
+                    </td></tr>
                     <?php else: ?>
                     <?php foreach ($messages as $msg): ?>
                     <tr>
                         <td><?= $msg['id'] ?></td>
                         <td><span class="badge badge-<?= $msg['type'] ?>"><?= getTypeLabel($msg['type']) ?></span></td>
-                        <td class="td-title" title="<?= cleanInput($msg['title']) ?>"><?= cleanInput(mb_substr($msg['title'], 0, 20)) ?></td>
+                        <td class="td-title" title="<?= cleanInput($msg['title']) ?>">
+                            <?= cleanInput(mb_substr($msg['title'], 0, 20)) ?>
+                            <?php if (publicImageUrl($msg['image'])): ?> 📷<?php elseif ($msg['image']): ?> ⚠️<?php endif; ?>
+                        </td>
                         <td><?= cleanInput($msg['nickname']) ?></td>
                         <td><span class="status-badge status-<?= getStatusClass($msg['status']) ?>"><?= getStatusLabel($msg['status']) ?></span></td>
                         <td><?= $msg['views'] ?></td>
@@ -171,66 +190,82 @@ include __DIR__ . '/header.php';
 </div>
 
 <script>
-function auditMessage(id, status) {
-    const action = status === 1 ? '通过' : '拒绝';
-    if (!confirm('确定要' + action + '这条留言吗？')) return;
-    fetch('api.php', {
+function apiPost(body) {
+    return fetch('api.php', {
         method: 'POST',
         headers: {'Content-Type': 'application/x-www-form-urlencoded'},
-        body: 'action=audit&id=' + id + '&status=' + status
-    })
-    .then(r => r.json())
-    .then(data => {
+        body: body
+    }).then(r => r.json());
+}
+
+function handleAction(promiseFactory, confirmText, {retryable = true} = {}) {
+    if (!window.confirm(confirmText)) return Promise.resolve();
+    const run = () => promiseFactory().then(data => {
         if (data.code === 0) {
-            alert('操作成功');
+            window.alert(data.msg || '操作成功');
             location.reload();
         } else {
-            alert(data.msg);
+            const retry = retryable && window.confirm('操作失败：' + (data.msg || '未知错误') + '\n\n点击“确定”重试，点击“取消”留在当前页面（数据未变更）。');
+            if (retry) return run();
         }
+    }).catch(() => {
+        const retry = window.confirm('网络错误，操作未完成，数据未变更。\n\n点击“确定”重试，点击“取消”留在当前页面。');
+        if (retry) return run();
     });
+    return run();
+}
+
+function auditMessage(id, status) {
+    const action = status === 1 ? '通过' : '拒绝';
+    handleAction(
+        () => apiPost('action=audit&id=' + encodeURIComponent(id) + '&status=' + status),
+        '确定要' + action + '这条留言吗？'
+    );
 }
 
 function deleteMessage(id) {
-    if (!confirm('确定要删除这条留言吗？此操作不可恢复！')) return;
-    fetch('api.php', {
-        method: 'POST',
-        headers: {'Content-Type': 'application/x-www-form-urlencoded'},
-        body: 'action=delete&id=' + id
-    })
-    .then(r => r.json())
-    .then(data => {
-        if (data.code === 0) {
-            alert('删除成功');
-            location.reload();
-        } else {
-            alert(data.msg);
-        }
-    });
+    handleAction(
+        () => apiPost('action=delete&id=' + encodeURIComponent(id)),
+        '确定要删除这条留言吗？关联的图片、收藏与举报记录将一并清理，此操作不可恢复！'
+    );
+}
+
+function escapeHtml(s) {
+    return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 }
 
 function viewMessage(id) {
-    document.getElementById('viewModal').style.display = 'flex';
-    document.getElementById('modalBody').innerHTML = '加载中...';
-    fetch('api.php?action=detail&id=' + id)
+    const modal = document.getElementById('viewModal');
+    const body = document.getElementById('modalBody');
+    modal.style.display = 'flex';
+    body.innerHTML = '<div class="text-center" style="padding:24px;">加载中...</div>';
+    fetch('api.php?action=detail&id=' + encodeURIComponent(id))
     .then(r => r.json())
     .then(data => {
         if (data.code === 0) {
             const d = data.data;
             let html = '<div class="detail-view">';
-            html += '<p><strong>类型：</strong>' + d.type_label + '</p>';
-            html += '<p><strong>标题：</strong>' + d.title + '</p>';
-            html += '<p><strong>昵称：</strong>' + d.nickname + '</p>';
-            html += '<p><strong>电话：</strong>' + (d.phone || '未填写') + '</p>';
+            html += '<p><strong>类型：</strong>' + escapeHtml(d.type_label) + '</p>';
+            html += '<p><strong>标题：</strong>' + escapeHtml(d.title) + '</p>';
+            html += '<p><strong>昵称：</strong>' + escapeHtml(d.nickname) + '</p>';
+            html += '<p><strong>电话：</strong>' + escapeHtml(d.phone || '未填写') + '</p>';
             html += '<p><strong>内容：</strong></p><div class="detail-text">' + d.content + '</div>';
-            if (d.image) html += '<p><strong>图片：</strong><br><img src="../' + d.image + '" style="max-width:100%;margin-top:8px;"></p>';
-            html += '<p><strong>状态：</strong>' + d.status_label + '</p>';
-            html += '<p><strong>浏览量：</strong>' + d.views + '</p>';
-            html += '<p><strong>时间：</strong>' + d.created_at + '</p>';
+            if (d.image_url) {
+                html += '<p><strong>图片：</strong><br><img src="../' + encodeURI(d.image_url) + '" style="max-width:100%;margin-top:8px;" onerror="this.closest(\'p\').innerHTML=\'图片文件缺失（记录与文件不同步，请删除该留言）\'"></p>';
+            } else if (d.image) {
+                html += '<p class="text-muted">图片文件缺失或路径异常（数据库记录：' + escapeHtml(d.image) + '）</p>';
+            }
+            html += '<p><strong>状态：</strong><span class="status-badge status-' + escapeHtml(d.status_class || '') + '">' + escapeHtml(d.status_label) + '</span></p>';
+            html += '<p><strong>浏览量：</strong>' + escapeHtml(d.views) + '</p>';
+            html += '<p><strong>时间：</strong>' + escapeHtml(d.created_at) + '</p>';
             html += '</div>';
-            document.getElementById('modalBody').innerHTML = html;
+            body.innerHTML = html;
         } else {
-            document.getElementById('modalBody').innerHTML = data.msg;
+            body.innerHTML = '<div class="empty-state"><div class="empty-icon">⚠️</div><p>' + escapeHtml(data.msg || '加载失败') + '</p><button type="button" class="btn btn-secondary" onclick="viewMessage(' + id + ')">重试</button> <button type="button" class="btn btn-primary" onclick="location.reload()">刷新列表</button></div>';
         }
+    })
+    .catch(() => {
+        body.innerHTML = '<div class="empty-state"><div class="empty-icon">📡</div><p>网络错误，详情加载失败</p><button type="button" class="btn btn-primary" onclick="viewMessage(' + id + ')">重试</button></div>';
     });
 }
 

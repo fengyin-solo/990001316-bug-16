@@ -113,7 +113,7 @@ include __DIR__ . '/includes/header.php';
                     <p class="card-content"><?= cleanInput(mb_substr($msg['content'], 0, 80)) ?><?= mb_strlen($msg['content']) > 80 ? '...' : '' ?></p>
                     <div class="card-footer">
                         <span class="card-author">👤 <?= cleanInput($msg['nickname']) ?></span>
-                        <?php if ($msg['image']): ?>
+                        <?php if (publicImageUrl($msg['image'])): ?>
                         <span class="card-image">📷 有图</span>
                         <?php endif; ?>
                         <span class="card-views">👁 <?= $msg['views'] ?></span>
